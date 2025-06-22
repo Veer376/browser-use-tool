@@ -14,6 +14,7 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from .utils import get_model, SYSTEM_MESSAGE
 from .tools import tools
+from langgraph.checkpoint.memory import InMemorySaver
 
 llm = get_model()
 
@@ -27,8 +28,8 @@ class BrowserState(BaseModel):
 class State(TypedDict):
     """State maintained by the supervisor agent"""
     messages: Annotated[list[dict], add_messages]
-    current_screenshot: str  # Latest screenshot as base64
-    goal: str  # User's goal/task
+    current_screenshot: str
+    goal: str
     browser_state: Dict[str, Any]  # Browser metadata
     execution_history: List[str]  # History of actions performed
 
@@ -38,8 +39,8 @@ browser_action_router = ToolNode(
     name="browser_action_router"
 )
 
-
-def browser_supervisor(state: State):
+x=0
+async def browser_supervisor(state: State):
     """Supervisor agent that manages browser actions based on user goals."""
     print("Starting browser supervisor agent...")
     multimodal_content = [
@@ -47,26 +48,39 @@ def browser_supervisor(state: State):
         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{state['current_screenshot']}"}}
     ]
     
-    response = llm.bind_tools(tools).invoke([
+    
+    folder = "screenshots"
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+        
+    global x
+    filename = f"screenshot_{x}.png"
+    x += 1
+    filepath = os.path.join(folder, filename)
+    
+    image_data = base64.b64decode(state['current_screenshot'])
+    with open(filepath, "wb") as f:
+        f.write(image_data)
+        
+        
+    response = await llm.bind_tools(tools).ainvoke([
         SystemMessage(content=SYSTEM_MESSAGE),
         HumanMessage(content=multimodal_content)
     ])
-    print("Supervisor response:", response)
     return {"messages": [response]}
 
-def state_updator(state: State):
-    pass
-
 builder = StateGraph(State)
-builder.add_node(browser_supervisor)
-builder.add_node(browser_action_router)
+builder.add_node("browser_supervisor", browser_supervisor)
+builder.add_node("browser_action_router", browser_action_router)
 builder.add_edge(START, "browser_supervisor")
 builder.add_conditional_edges(
     "browser_supervisor",
     lambda state: "browser_action_router" if getattr(state["messages"][-1], "tool_calls", None) else END
 )
-builder.add_edge("browser_action_router", "browser_supervisor")
+# builder.add_edge("browser_action_router", "browser_supervisor")
 
-agent = builder.compile()
+
+checkpointer = InMemorySaver()
+agent = builder.compile(checkpointer=checkpointer)
 
 

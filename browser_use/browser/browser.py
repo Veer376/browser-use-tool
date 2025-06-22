@@ -1,11 +1,10 @@
 # filepath: c:\Users\aryav\projects\orbitagent\browser_use_agent\services\browser.py
-from playwright.sync_api import sync_playwright, Page, Browser, Playwright
+from playwright.async_api import async_playwright, Page, Browser, Playwright
 from google.genai import types
 import io
 from typing import Optional, Any
 from pydantic import BaseModel
 
-# Example improvement (conceptual):
 class BrowserActionResult(BaseModel):
     success: bool
     message: str
@@ -28,50 +27,55 @@ def correct_coordinates(x, y, viewport_width=1280, viewport_height=800):
 
 class Browser:    
     def __init__(self, viewport_width=1280, viewport_height=800):
+        # Standard viewport size that provides good visibility for most web content
+        # 1280x800 is a common resolution that works well for most websites
+        self.viewport_width = viewport_width
+        self.viewport_height = viewport_height
+        self.playwright = None
+        self.browser = None
+        self.page = None
+        self.iteration_count = 0
+        self.last_screenshot_path = None
+        
+    async def initialize(self):
         try:
-            # Standard viewport size that provides good visibility for most web content
-            # 1280x800 is a common resolution that works well for most websites
-            self.viewport_width = viewport_width
-            self.viewport_height = viewport_height
-            self.playwright = sync_playwright().start()
-            self.browser = self.playwright.chromium.launch(
+            self.playwright = await async_playwright().start()
+            self.browser = await self.playwright.chromium.launch(
                 headless=False, # Keep False for debugging, True for headless
                 chromium_sandbox=True,
                 env={},
                 args=["--disable-extensions", "--disable-file-system"]
             )
-            self.page = self.browser.new_page()
-            self.page.set_viewport_size({"width": viewport_width, "height": viewport_height})
-            print(f"[BROWSER] Browser initialized with viewport: {viewport_width}x{viewport_height}")
-            
-            self.iteration_count = 0
-            self.last_screenshot_path = None
-
+            self.page = await self.browser.new_page()
+            await self.page.set_viewport_size({"width": self.viewport_width, "height": self.viewport_height})
+            print(f"[BROWSER] Browser initialized with viewport: {self.viewport_width}x{self.viewport_height}")
+            return True
         except Exception as e:
+            print(f"[BROWSER] Error initializing browser: {e}")
             if hasattr(self, 'browser') and self.browser:
-                self.browser.close()
+                await self.browser.close()
             if hasattr(self, 'playwright') and self.playwright:
-                self.playwright.stop()
-
-    def navigate(self, url: str):
+                await self.playwright.stop()
+            return False
+                
+    async def navigate(self, url: str):
         try:
-            self.page.goto(url, wait_until='load', timeout=60000) # Wait for load, reasonable timeout
+            await self.page.goto(url, wait_until='load', timeout=60000) # Wait for load, reasonable timeout
             return {
                 "success": True,
                 "message": f"Successfully navigated to {url}",
             }
-        except Exception as e:
-            return {
+        except Exception as e:            return {
                 "success": False,
                 "message": f"Error navigating to {url}: {str(e)}",
             }
             
-    def close(self):
+    async def close(self):
         try:
             if hasattr(self, 'browser') and self.browser:
-                self.browser.close()
+                await self.browser.close()
             if hasattr(self, 'playwright') and self.playwright:
-                self.playwright.stop()
+                await self.playwright.stop()
             return {
                 "success": True,
                 "message": "Browser successfully closed",
@@ -82,17 +86,17 @@ class Browser:
                 "message": f"Error closing browser: {str(e)}",
             }
             
-    def screenshot_bytes(self, iteration=None) -> types.Part:
+    async def screenshot_bytes(self, iteration=None) -> types.Part:
         try:
-            screenshot_bytes = self.page.screenshot()
+            screenshot_bytes = await self.page.screenshot()
             return screenshot_bytes
         except Exception as e:
             return str(e)
 
-    def screenshot_part(self):
+    async def screenshot_part(self):
         try:
             # Take the screenshot
-            screenshot_bytes = self.page.screenshot()
+            screenshot_bytes = await self.page.screenshot()
             
             # Convert to Part object for the model
             # image_stream = io.BytesIO(screenshot_bytes)
@@ -121,14 +125,12 @@ class Browser:
                 "message": "Screenshot part captured successfully",
                 "data": part_data
             }
-        except Exception as e:
-            return {
+        except Exception as e:            return {
                 "success": False,
                 "message": f"Error taking screenshot part: {str(e)}",
             }
             
-    def click(self, x: float, y: float, label: str = None, button: str = "left", timeout: int = 5000, delay_after: int = 500):
-        
+    async def click(self, x: float, y: float, label: str = None, button: str = "left", timeout: int = 5000, delay_after: int = 500):
         label = label or '[no label provided]'
         
         try:
@@ -142,8 +144,8 @@ class Browser:
             )
             
             # Execute the click
-            self.page.mouse.click(x_orig, y_orig, button=button)
-            self.page.wait_for_timeout(delay_after)
+            await self.page.mouse.click(x_orig, y_orig, button=button)
+            await self.page.wait_for_timeout(delay_after)
             return {
                 "success": True,
                 "message": f"Successfully clicked at coordinates ({x},{y}), label: '{label}'",
@@ -155,7 +157,7 @@ class Browser:
                 "message": f"Error clicking at coordinates ({x},{y}): {str(e)}",
             }
             
-    def scroll(self, direction: str = "down", amount: int = 500, x: float = None, y: float = None, delay_after: int = 500):
+    async def scroll(self, direction: str = "down", amount: int = 500, x: float = None, y: float = None, delay_after: int = 500):
         
         try:
             if x is not None and y is not None:
@@ -165,12 +167,12 @@ class Browser:
                     viewport_width=self.viewport_width, 
                     viewport_height=self.viewport_height
                 )
-                self.page.mouse.move(x_orig, y_orig)
+                await self.page.mouse.move(x_orig, y_orig)
             
             scroll_delta_y = amount if direction == "down" else -amount
             
-            self.page.mouse.wheel(0, scroll_delta_y)
-            self.page.wait_for_timeout(delay_after)
+            await self.page.mouse.wheel(0, scroll_delta_y)
+            await self.page.wait_for_timeout(delay_after)
             return {
                 "success": True,
                 "message": f"Successfully scrolled {direction} by {amount} pixels",
@@ -178,14 +180,13 @@ class Browser:
         except Exception as e:
             return {
                 "success": False,                
-                "message": f"Error scrolling {direction}: {str(e)}",
-            }
+                "message": f"Error scrolling {direction}: {str(e)}",            }
             
-    def type_text(self, text: str, label: str = None, delay: int = 50, timeout: int = 10000, delay_after: int = 200):
+    async def type_text(self, text: str, label: str = None, delay: int = 50, timeout: int = 10000, delay_after: int = 200):
         label = label or '[no field label provided]'
         try:
-            self.page.keyboard.type(text, delay=delay)
-            self.page.wait_for_timeout(delay_after)
+            await self.page.keyboard.type(text, delay=delay)
+            await self.page.wait_for_timeout(delay_after)
             return {
                 "success": True,
                 "message": f"Typed text: '{text}' into field: '{label}'",
@@ -193,10 +194,9 @@ class Browser:
         except Exception as e:
             return {
                 "success": False,
-                "message": f"Error typing text '{text}': {str(e)}",                
-            }
+                "message": f"Error typing text '{text}': {str(e)}",                  }
             
-    def press_keys(self, keys, delay_after: int = 200):
+    async def press_keys(self, keys, delay_after: int = 200):
         try:
             pressed_keys = []
             for key in keys:
@@ -208,20 +208,19 @@ class Browser:
                 elif key.lower() == "escape" or key.lower() == "esc":
                     pw_key = "Escape"
                 
-                print(f"[BROWSER] Pressing key: '{pw_key}'")
-                self.page.keyboard.press(pw_key)
+                await self.page.keyboard.press(pw_key)
                 pressed_keys.append(pw_key)
                 
                 if pw_key == "Enter":
                     try:
-                        self.page.wait_for_load_state("load", timeout=10000)
+                        await self.page.wait_for_load_state("load", timeout=10000)
                     except Exception as e:
                         try:
-                            self.page.wait_for_load_state("networkidle", timeout=5000)
+                            await self.page.wait_for_load_state("networkidle", timeout=5000)
                         except Exception as ne:
-                            self.page.wait_for_timeout(2000)
+                            await self.page.wait_for_timeout(2000)
                 else:
-                    self.page.wait_for_timeout(delay_after)
+                    await self.page.wait_for_timeout(delay_after)
             return {
                 "success": True,
                 "message": f"Successfully pressed keys: {', '.join(pressed_keys)}",
@@ -229,13 +228,12 @@ class Browser:
         except Exception as e:
             return {
                 "success": False,
-                "message": f"Error pressing keys: {str(e)}",              
-            }
+                "message": f"Error pressing keys: {str(e)}",                }
             
-    def go_back(self, delay_after: int = 1000):
+    async def go_back(self, delay_after: int = 1000):
         try:
-            self.page.go_back()
-            self.page.wait_for_timeout(delay_after)
+            await self.page.go_back()
+            await self.page.wait_for_timeout(delay_after)
             return {
                 "success": True,
                 "message": "Successfully navigated back to previous page",

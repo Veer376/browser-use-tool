@@ -18,17 +18,15 @@ class ClickSchema(BaseModel):
     location: Coordinates = Field(..., description="The location of the element to click on, in the format 'x,y'")
     
 @tool("navigate_to_url", args_schema=UrlSchema, description="Use this tool to navigate to a specific website URL.")
-def navigate_to_url(url: str) -> str:
-    print(f"Navigating to URL: {url}")
-    browser = get_browser()
-    result = browser.navigate(url)
+async def navigate_to_url(url: str) -> str:
+    browser = await get_browser()
+    result = await browser.navigate(url)
     return result["message"]
 
 @tool("click_element", args_schema=ClickSchema, description="Use this tool to click on an element in the current page.")
-def click_element(args_schema: ClickSchema) -> str:
-    print(f"Clicking element: {args_schema.label} at {args_schema.location}")
-    browser = get_browser()
-    result = browser.click(x=args_schema.location.x, y=args_schema.location.y, label=args_schema.label)
+async def click_element(label: str, location: Coordinates) -> str:
+    browser = await get_browser()
+    result = await browser.click(x=location.x, y=location.y, label=label)
     return result["message"]
     
 class TypeTextSchema(BaseModel):
@@ -41,16 +39,23 @@ class TypeTextSchema(BaseModel):
     args_schema=TypeTextSchema,
     description="use this tool to type text in the input field."
 )
-def type_text(args_schema: TypeTextSchema) -> str:
-    print(f"Typing text: '{args_schema.text}' into input field with label: {args_schema.label}")
-    browser = get_browser()
-    result = browser.type_text(text=args_schema.text, label=args_schema.label)
+async def type_text(text: str, label: str) -> str:
+    browser = await get_browser()
+    result = await browser.type_text(text=text, label=label)
     return result["message"]
 
-
+class PressKeysSchema(BaseModel):
+    keys: list[str] = Field(..., description="List of keys to press on the keyboard. For example: ['Enter', 'a', 'b', 'c']")
+    
+@tool("press_keys", args_schema=PressKeysSchema, description="Use this tool to press keys on the keyboard.")
+async def press_keys(keys: list[str]) -> str:
+    browser = await get_browser()
+    result = await browser.press_keys(keys=keys)
+    return result["message"]
 
 tools = [
     # navigate_to_url,
     click_element,
     type_text,
+    press_keys,
 ]
