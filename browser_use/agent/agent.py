@@ -10,28 +10,14 @@ import os
 import base64
 from langchain_core.tools import tool
 from langgraph.graph import StateGraph, START, END
-from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from .utils import get_model, SYSTEM_MESSAGE
 from .tools import tools
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.errors import NodeInterrupt
+from .schema import *
 
 llm = get_model()
-
-class BrowserState(BaseModel):
-    """Current state of the browser"""
-    url: str = ""
-    viewport_width: int = 1280
-    viewport_height: int = 800
-    page_title: Optional[str] = None
-    
-class State(TypedDict):
-    """State maintained by the supervisor agent"""
-    messages: Annotated[list[dict], add_messages]
-    current_screenshot: str
-    goal: str
-    browser_state: Dict[str, Any]  # Browser metadata
-    execution_history: List[str]  # History of actions performed
 
 
 browser_action_router = ToolNode(
@@ -39,13 +25,15 @@ browser_action_router = ToolNode(
     name="browser_action_router"
 )
 
+
 x=0
-async def browser_supervisor(state: State):
+async def browser_supervisor(state: AgentState):
     """Supervisor agent that manages browser actions based on user goals."""
-    print("Starting browser supervisor agent...")
+    print("supervisor agent...")
+    
     multimodal_content = [
-        {"type": "text", "text": f"Goal: {state['goal']}\n\nCurrent browser state: {state['browser_state']}\n\nExecution history: {state['execution_history']}"},
-        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{state['current_screenshot']}"}}
+        {"type": "text", "text": f"Goal: {state['goal']}"},
+        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{state['browser_state']['screenshot']}"}},
     ]
     
     
@@ -57,8 +45,8 @@ async def browser_supervisor(state: State):
     filename = f"screenshot_{x}.png"
     x += 1
     filepath = os.path.join(folder, filename)
-    
-    image_data = base64.b64decode(state['current_screenshot'])
+
+    image_data = base64.b64decode(state['browser_state']['screenshot'])
     with open(filepath, "wb") as f:
         f.write(image_data)
         
@@ -69,7 +57,9 @@ async def browser_supervisor(state: State):
     ])
     return {"messages": [response]}
 
-builder = StateGraph(State)
+
+
+builder = StateGraph(AgentState)
 builder.add_node("browser_supervisor", browser_supervisor)
 builder.add_node("browser_action_router", browser_action_router)
 builder.add_edge(START, "browser_supervisor")
@@ -82,5 +72,3 @@ builder.add_conditional_edges(
 
 checkpointer = InMemorySaver()
 agent = builder.compile(checkpointer=checkpointer)
-
-
