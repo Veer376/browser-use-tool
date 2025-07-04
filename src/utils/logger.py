@@ -25,15 +25,15 @@ class Colors:
     UNDERLINE = "\033[4m" # Underlined text
 
 class LogLevel(Enum):
-    ERROR = "ERROR"
-    WARNING = "WARNING"
-    INFO = "INFO"
-    DEBUG = "DEBUG"
+    ERROR = "🚫ERROR"
+    WARNING = "⚠️WARNING"
+    INFO = "ℹINFO"
+    DEBUG = "🐞DEBUG"
 
 class Component(Enum):
-    BROWSER = "BROWSER"
-    AGENT = "AGENT"
-    TOOLS = "TOOLS"
+    BROWSER = "🌎 BROWSER"
+    AGENT = "🤖ིྀ AGENT"
+    TOOLS = "🛠️ TOOLS"
 
 class Logger:
     """
@@ -83,8 +83,8 @@ class Logger:
         level_color = cls._get_level_color(level)
         
         formatted_message = (
-            f"{timestamp} "
-            f"{component_color}[{component.value}]{Colors.RESET}"
+            # f"{timestamp} "
+            f"{component_color}{Colors.BOLD}[{component.value}]{Colors.RESET}"
             f"{level_color}[{level.value}]{Colors.RESET}"
             f"[{message}]"
         )
