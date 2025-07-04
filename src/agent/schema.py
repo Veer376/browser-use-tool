@@ -24,7 +24,7 @@ class PageState:
     dom_structure: str
     viewport_width: int
     viewport_height: int
-    screenshots: list[str]
+    screenshots: Annotated[list[str], add_messages] # add_messages implies 'add' reducer with 'update mechanism using ID'
 
 class AgentState(TypedDict):
     # identity state

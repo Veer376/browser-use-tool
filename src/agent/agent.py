@@ -19,6 +19,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import NodeInterrupt
 from .schema import *
 from ..browser import get_browser
+from ..utils.logger import agent_info
 
 llm = get_model()
 
@@ -34,10 +35,7 @@ async def browser_supervisor(state: AgentState):
     """Supervisor agent that manages browser actions based on user goals."""
     
     if state['execution_state']['status'] == "failed":
-        from rich.markdown import Markdown
-        from rich.console import Console
-        console = Console()
-        console.print(Markdown(f"{state['messages']}"))
+        agent_info(f"Completed Or Failed : {state['messages']}")
         return Command(goto=END)
     
     content = [
@@ -62,8 +60,16 @@ async def browser_supervisor(state: AgentState):
             "text": f"Analyze the screenshot and decide the next best action to take based on the user's goal. Also analyze the last tool call status."
         }
     ]
+        
+    response = await llm.bind_tools(tools).ainvoke([
+        SystemMessage(content=SYSTEM_MESSAGE),
+        HumanMessage(content=content)
+    ])
     
-    
+    return {"messages": [response]}
+
+# Additional state updater node
+async def state_updater(state: AgentState):
     
     folder = "screenshots"
     if not os.path.exists(folder):
@@ -74,40 +80,40 @@ async def browser_supervisor(state: AgentState):
     x += 1
     filepath = os.path.join(folder, filename)
 
-    image_data = base64.b64decode(state['browser_state']['screenshots'][-1])
-    with open(filepath, "wb") as f:
-        f.write(image_data)
-        
-        
-    response = await llm.bind_tools(tools).ainvoke([
-        SystemMessage(content=SYSTEM_MESSAGE),
-        HumanMessage(content=content)
-    ])
-    return {"messages": [response]}
-
-# Additional state updater node
-async def state_updater(state: AgentState):
     browser = await get_browser()
-    screenshot = await browser.screenshot_bytes()
+    result = await browser.screenshot_bytes()   
+    
+    if not result.success:
+        agent_info(f"Failed to take screenshot: {result.message}")
+        raise NodeInterrupt("Failed to take screenshot")
+    
+    screenshot = result.data
+    
+    with open(filepath, "wb") as f:
+        f.write(screenshot)
+        
     screenshot_base64 = base64.b64encode(screenshot).decode('utf-8')
-    state['browser_state']['screenshots'].append(screenshot_base64)
+    
+    return {'browser_state': {'screenshots': [screenshot_base64]}}
     
     
     
-builder = StateGraph(AgentState)
-builder.add_node("browser_supervisor", browser_supervisor)
-builder.add_node("browser_action_router", browser_action_router)
-builder.add_node("state_updater", state_updater)
+    
+def build_agent():
+    builder = StateGraph(AgentState)
+    builder.add_node("browser_supervisor", browser_supervisor)
+    builder.add_node("browser_action_router", browser_action_router)
+    builder.add_node("state_updater", state_updater)
 
-builder.add_edge(START, "browser_supervisor")
-builder.add_conditional_edges(
-    "browser_supervisor",
-    lambda state: "browser_action_router" if getattr(state["messages"][-1], "tool_calls", None) else END
-)
-builder.add_edge("browser_action_router", "state_updater")
-builder.add_edge("state_updater", "browser_supervisor")
+    builder.add_edge(START, "browser_supervisor")
+    builder.add_conditional_edges(
+        "browser_supervisor",
+        lambda state: "browser_action_router" if getattr(state["messages"][-1], "tool_calls", None) else END
+    )
+    builder.add_edge("browser_action_router", "state_updater")
+    builder.add_edge("state_updater", "browser_supervisor")
+    
+    checkpointer = InMemorySaver()
+    agent = builder.compile(checkpointer=checkpointer)
 
-
-
-checkpointer = InMemorySaver()
-agent = builder.compile(checkpointer=checkpointer)
+    return agent

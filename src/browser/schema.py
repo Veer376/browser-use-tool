@@ -6,7 +6,7 @@ class BrowserActionResult(BaseModel):
     success: bool
     message: str
     action_type: Optional[str] = None
-    data: Optional[dict[str, Any]] = None
+    data: Any = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
     @classmethod

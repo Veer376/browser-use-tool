@@ -15,9 +15,11 @@ def get_model():
             return init_chat_model("google_genai:gemini-2.0-flash")
         
     except Exception as e:
-        print(f"Error initializing model: {e}")
+        from ..utils.logger import agent_error
+        agent_error(f"Error initializing model: {e}")
         import traceback
-        traceback.print_exc()
+        error_trace = traceback.format_exc()
+        agent_error(error_trace)
         raise
     
     
@@ -56,13 +58,11 @@ TOOLS YOU CAN USE:
 8. exit(reason: str): If got stuck in loops or task has been completed or failed then stop the agent gracefully, providing a reason for exiting.
 
 IMPORTANT RULES:
-- After typing text in a search box, you must press Enter to submit the search
+- Always make sure that the text input field is clicked and in focus before typing text.
+- Always make sure the UI elements you interact with are visible and clickable, else hit to the human_interaction to ask the user to zoom out.
 - Only use wait when a page is still loading, handling a CAPTCHA, or when the user asks you to wait
 - Use human_interaction only for sensitive information (like passwords) or when you're stuck
-- Always select the most specific and relevant action to make progress toward the user's goal
-- If you're unsure what to do next, look for clues in the screenshot like buttons, forms, or navigation elements
 
-Use simple actions, one step at a time, to help the user complete their task.
 """
 
 
