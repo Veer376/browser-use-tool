@@ -10,6 +10,7 @@ from langgraph.types import interrupt
 import asyncio
 from google import genai
 import os
+from ..utils.logger import tools_info, tools_error, tools_warning
 
 @tool(
     "navigate_to_url", 
@@ -35,61 +36,64 @@ async def navigate_to_url(url: str, state: Annotated[dict, InjectedState]) -> st
 )
 async def click(label: str, description: str, state: Annotated[dict, InjectedState]) -> str:
     
-    screenshot = state["browser_state"]["screenshots"][-1]  
+    browser = await get_browser()
     
-    image_part = genai.types.Part(
-        inline_data=genai.types.Blob(
-            mime_type="image/png",
-            data=screenshot
+    screenshot_base64 = state["browser_state"]["screenshots"][-1]
+    
+    try:
+        # Convert base64 string to bytes for the Gemini API
+        screenshot_bytes = base64.b64decode(screenshot_base64)
+        
+        image_part = genai.types.Part(
+            inline_data=genai.types.Blob(
+                mime_type="image/jpeg",
+                data=screenshot_bytes
+            )
         )
-    )
-    # First handle the label using the locator() function, then only use the genai API.
+    except Exception as e:
+        return f"Error processing screenshot: {str(e)}"
+        
     response = genai.Client(api_key=os.getenv("GENAI_API_KEY")).models.generate_content(
         model="gemini-2.5-flash",
-        contents=[image_part, f"Bounding box for label: '{label}' with description '{description}'. It should be in the format: [ymin, xmin, ymax, xmax] normalized to 0-1000."],
+        contents=[image_part, f"Return single most appropriate bounding box for clickable element with label: '{label}' and description: '{description}'. The box_2d should be [ymin, xmin, ymax, xmax] normalized to 0-1000. Example: {{\"box_2d\": [100, 200, 300, 400], \"label\": \"Submit\"}}"],
         config=types.GenerateContentConfig(
             response_mime_type="application/json",
-            system_instruction="""
-            You are a helpful assistant, expert in computer vision and spatial understanding.
-            You will be provided with a screenshot of a web page and a label describing a clickable element on that page like button, dropdown, clickable text, etc.
-            Your task is to identify and return a most appropriate bounding box coordinates of the clickable element on the browser matching the label in the screenshot.
-            
-            **Follow these guidelines:**
-            1. Elements can be a button, link, input field, or any other clickable element.
-            2. Generate correct bounding box coordinates for the element.
-            3. If multiple elements match the description, return the most appropriate one.
-            
-            The bounding box coordinates should be in the format: [ymin, xmin, ymax, xmax].
-            The coordinates should be normalized to 0-1000 scale.
-            """
         )
     )
+    def parse_json(json_output: str):
+        # Parsing out the markdown fencing
+        lines = json_output.splitlines()
+        for i, line in enumerate(lines):
+            if line == "```json":
+                json_output = "\n".join(lines[i+1:])  # Remove everything before "```json"
+                json_output = json_output.split("```")[0]  # Remove everything after the closing "```"
+                break  # Exit the loop once "```json" is found
+        return json_output
     
     import json
-    bounding_box = json.loads(response.text)
+    bounding_box = json.loads(parse_json(response.text))
     
-    print(f"INSIDE THE CLICK_ELEMENT Bounding box for {label}: {bounding_box}")
-    
-    y1 = int(bounding_box[0])
-    x1 = int(bounding_box[1])
-    y2 = int(bounding_box[2])
-    x2 = int(bounding_box[3])
+    y1 = int(bounding_box["box_2d"][0])
+    x1 = int(bounding_box["box_2d"][1])
+    y2 = int(bounding_box["box_2d"][2])
+    x2 = int(bounding_box["box_2d"][3])
     
     if y1 == 0 and x1 == 0 and y2 == 0 and x2 == 0:
         return f"Failed because the LLM didn't find the coordinates of the label, Try to give the label with detail description"
     
     x =  (x1 + x2) / 2
     y = (y1 + y2) / 2
-
-    x,y = correct_coordinates(x,y)
     
-    browser = await get_browser()
+    viewport = await browser.page.evaluate("() => ({ width: window.innerWidth, height: window.innerHeight })")
+    width, height = viewport['width'], viewport['height']
     
-    await browser.show_pointer_pro(x=x, y=y)
+    x, y = correct_coordinates(x, y, viewport_width=width, viewport_height=height)
+    
+    await browser.show_pointer(x=x, y=y)
     await browser.page.wait_for_timeout(10000)
     await browser.hide_pointer()
 
-    result = await browser.click(x=x, y=y, label=label)
+    result = await browser.click_coordinates(x=x, y=y, label=label)
     
     if not result.success:
         state['execution_state']['consecutive_failures'] += 1
@@ -159,16 +163,37 @@ async def go_back(state: Annotated[dict, InjectedState]) -> str:
 )
 async def human_interaction(query: str):
     value = interrupt({"Agent": query})
-    return value
+    return f"USER: {value}"
 
 
 @tool(
     "wait", 
-    args_schema=WaitSchema, 
     description="Use this tool to wait for seconds before proceeding with the next action."
 )
-async def wait(seconds: int):
-    await asyncio.sleep(seconds)
+async def wait(seconds: float, state: Annotated[dict, InjectedState]):
+    try:
+        # Ensure seconds is a number and not a string
+        seconds_float = float(seconds)
+
+        # Limit maximum wait time to a reasonable value (e.g., 300 seconds)
+        max_wait = 300.0
+        if seconds_float > max_wait:
+            seconds_float = max_wait
+        
+        state['execution_state']['status'] = "waiting"  
+        await asyncio.sleep(seconds_float)
+        state['execution_state']['status'] = "running"
+        
+        # Update state if available
+        if state is not None:
+            state['execution_state']['history'].append(f"Waited for {seconds_float} seconds")
+            
+        return f"Waited for {seconds_float} seconds."
+    
+    except Exception as e:
+        # Handle any other exceptions
+        error_msg = f"Error while waiting: {str(e)}"
+        return error_msg
 
 @tool(
     "exit",
