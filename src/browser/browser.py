@@ -91,6 +91,8 @@ class Browser:
             
             await self.page.goto(url, wait_until='load', timeout=60000) # Wait for load, reasonable timeout
             
+            browser_info(f"Navigated to {url} - Current page count: {len(self.context.pages)}")
+            
             # Check if navigation created new tabs (redirects, popups, etc.)
             if len(self.context.pages) > initial_pages:
                 await self._switch_to_newest_tab()
@@ -129,13 +131,21 @@ class Browser:
                 action_type="close",
                 message=f"Error closing browser: {str(e)}",
             )
-        
-    async def screenshot_bytes(self, iteration=None) -> types.Part:
+
+    async def screenshot_bytes(self, iteration=None) -> BrowserActionResult:
         try:
             screenshot_bytes = await self.page.screenshot()
-            return screenshot_bytes
+            return BrowserActionResult.create_success(
+                action_type="screenshot",
+                message="Screenshot captured successfully",
+                data=screenshot_bytes
+            )
         except Exception as e:
-            return str(e)
+            browser_error(f"Error taking screenshot: {e}")
+            return BrowserActionResult.create_failure(
+                action_type="screenshot",
+                message=f"Error taking screenshot: {str(e)}",
+            )   
 
     async def screenshot_part(self) -> BrowserActionResult:
         try:
@@ -358,12 +368,12 @@ class Browser:
                   // Verify pointer creation
                 return !!document.getElementById('ai-pointer');}"""
             
-            print(f"[BROWSER] Attempting to show pointer at coordinates: ({x}, {y})")
+            browser_info(f"Attempting to show pointer at coordinates: ({x}, {y})")
             # Pass coordinates as a dictionary to match the JavaScript parameters
             result = await self.page.evaluate(js_code, {'x': x, 'y': y})
             
             if result:
-                print(f"[BROWSER] Pointer created successfully at ({x}, {y})")
+                browser_info(f"Pointer created successfully at ({x}, {y})")
                 return BrowserActionResult.create_success(
                     action_type="show_pointer",
                     message=f"Successfully showed pointer at coordinates ({x},{y})",
@@ -371,7 +381,7 @@ class Browser:
             else:
                 raise Exception("Failed to create pointer element")
         except Exception as e:
-            print(f"[BROWSER] Error showing pointer: {e}")
+            browser_error(f"Error showing pointer: {e}")
             return BrowserActionResult.create_failure(
                 action_type="show_pointer",
                 message=f"Error showing pointer: {str(e)}",
@@ -390,7 +400,7 @@ class Browser:
                 message="Successfully removed pointer",
             )
         except Exception as e:
-            print(f"[BROWSER] Error removing pointer: {e}")
+            browser_error(f"Error removing pointer: {e}")
             return BrowserActionResult.create_failure(
                 action_type="hide_pointer",
                 message=f"Error removing pointer: {str(e)}",
@@ -416,13 +426,13 @@ class Browser:
         # Set viewport size for the new tab
         await self.page.set_viewport_size({"width": self.viewport_width, "height": self.viewport_height})
 
-        print(f"[BROWSER] 🔄 Switched to new tab: {self.page.url}")
+        browser_info(f"🔄 Switched to new tab: {self.page.url}")
         return True
     
     def set_auto_switch_tabs(self, enabled: bool):
         """Enable or disable automatic switching to new tabs"""
         self.auto_switch_to_new_tabs = enabled
-        print(f"[BROWSER] Auto-switch to new tabs: {'enabled' if enabled else 'disabled'}")
+        browser_info(f"Auto-switch to new tabs: {'enabled' if enabled else 'disabled'}")
         
     async def get_all_tabs_info(self):
         """Get information about all open tabs"""
@@ -447,159 +457,138 @@ class Browser:
     
     async def show_pointer_pro(self, x:float, y:float):
         try: 
-            js_code = r"""(coords) => {
-    // Remove existing cursor animations
-    document.querySelectorAll('.ai-cursor-container, .ai-cursor-splash').forEach(el => el.remove());
+            js_code = """
+            (coords) => {
+    // This is a self-contained function to create a radial splash animation at given coordinates.
+    // It now includes a programmatically generated SVG cursor.
 
-    const container = document.createElement('div');
-    container.className = 'ai-cursor-container';
-    container.style.cssText = `
-        position: fixed;
-        left: ${coords.x}px;
-        top: ${coords.y}px;
-        pointer-events: none;
-        z-index: 2147483647;
-    `;
-    document.body.appendChild(container);
+    const { x, y } = coords;
 
-    const cursor = document.createElement('div');
-    cursor.className = 'ai-cursor-icon';
-    cursor.innerHTML = `
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M3 3L10.07 19.97L12.58 12.58L19.97 10.07L3 3Z" fill="#3b82f6" stroke="#1e40af" stroke-width="1"/>
-        </svg>
-    `;
-    cursor.style.cssText = `
-        position: absolute;
-        transform: translate(-12px, -12px);
-        transition: all 0.3s ease-in-out;
-        filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
-    `;
-    container.appendChild(cursor);
-
-    setTimeout(() => {
-        cursor.style.opacity = '0';
-        cursor.style.transform = 'translate(-12px, -12px) scale(0.8)';
-        cursor.animate([
-            { opacity: 0, transform: 'translate(-12px, -12px) scale(0.8)' },
-            { opacity: 1, transform: 'translate(-12px, -12px) scale(1)' }
-        ], {
-            duration: 300,
-            fill: 'forwards'
-        });
-
-        setTimeout(() => {
-            cursor.animate([
-                { transform: 'translate(-12px, -12px) scale(1) rotate(0deg)' },
-                { transform: 'translate(-12px, -12px) scale(0.9) rotate(15deg)' },
-                { transform: 'translate(-12px, -12px) scale(1) rotate(0deg)' }
-            ], {
-                duration: 300,
-                easing: 'ease-in-out'
-            });
-
-            const ripple = document.createElement('div');
-            ripple.className = 'ai-cursor-ripple';
-            ripple.style.cssText = `
-                position: absolute;
-                width: 40px;
-                height: 40px;
-                border: 2px solid #3b82f6;
-                border-radius: 50%;
-                transform: translate(-20px, -20px);
-                opacity: 0.7;
-            `;
-            container.appendChild(ripple);
-
-            ripple.animate([
-                { transform: 'translate(-20px, -20px) scale(0.5)', opacity: 0.7 },
-                { transform: 'translate(-20px, -20px) scale(2)', opacity: 0 }
-            ], {
-                duration: 600,
-                easing: 'ease-out'
-            });
-
-            setTimeout(() => {
-                createSplashEffect(container);
-            }, 200);
-
-        }, 1000);
-
-    }, 100);
-
-    function createSplashEffect(container) {
-        const splashContainer = document.createElement('div');
-        splashContainer.className = 'ai-cursor-splash';
-        splashContainer.style.cssText = `
-            position: absolute;
-            transform: translate(-50px, -50px);
+    // --- 1. Define and Inject CSS Keyframes ---
+    // This part remains the same. It defines the animation for the splash lines.
+    const styleId = 'radial-splash-animation-style';
+    if (!document.getElementById(styleId)) {
+        const style = document.createElement('style');
+        style.id = styleId;
+        style.innerHTML = `
+            @keyframes radial-splash-animation {
+                0% {
+                    transform: scaleY(0);
+                    opacity: 1;
+                }
+                50% {
+                    transform: scaleY(1);
+                    opacity: 1;
+                }
+                100% {
+                    transform: scaleY(1);
+                    opacity: 0;
+                }
+            }
         `;
-        container.appendChild(splashContainer);
-
-        for (let i = 0; i < 3; i++) {
-            const circle = document.createElement('div');
-            circle.style.cssText = `
-                position: absolute;
-                width: ${80 + i * 20}px;
-                height: ${80 + i * 20}px;
-                border-radius: 50%;
-                background: linear-gradient(45deg, #3b82f6, #8b5cf6);
-                opacity: ${0.3 - i * 0.1};
-                transform: translate(-50%, -50%);
-            `;
-            splashContainer.appendChild(circle);
-
-            circle.animate([
-                { transform: 'translate(-50%, -50%) scale(0.5)', opacity: 0.3 - i * 0.1 },
-                { transform: 'translate(-50%, -50%) scale(3)', opacity: 0 }
-            ], {
-                duration: 600,
-                delay: i * 75,
-                easing: 'ease-out'
-            });
-        }
-
-        const numberOfParticles = 8;
-        for (let i = 0; i < numberOfParticles; i++) {
-            const particle = document.createElement('div');
-            const angle = (i / numberOfParticles) * 360;
-            const distance = 30 + Math.random() * 20;
-            const radians = angle * Math.PI / 180;
-            const endX = Math.cos(radians) * distance;
-            const endY = Math.sin(radians) * distance;
-
-            particle.style.cssText = `
-                position: absolute;
-                width: 8px;
-                height: 8px;
-                background: linear-gradient(45deg, #3b82f6, #8b5cf6);
-                border-radius: 50%;
-                transform: translate(-4px, -4px);
-            `;
-            splashContainer.appendChild(particle);
-
-            particle.animate([
-                { transform: 'translate(-4px, -4px) scale(1)', opacity: 0.8 },
-                { transform: 'translate(${endX}px, ${endY}px) scale(0)', opacity: 0 }
-            ], {
-                duration: 800,
-                delay: i * 50,
-                easing: 'ease-out'
-            });
-        }
+        document.head.appendChild(style);
     }
 
-    setTimeout(() => {
-        container.remove();
-    }, 2500);
-}"""
+    // --- 2. Create the Main Animation Container ---
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.left = `${x}px`;
+    container.style.top = `${y}px`;
+    container.style.pointerEvents = 'none';
+    container.style.zIndex = '40';
 
-            print(f"[BROWSER] Attempting to show pointer at coordinates: ({x}, {y})")
+    // --- NEW: Create the SVG Cursor Icon ---
+    const svgNS = "http://www.w3.org/2000/svg";
+    const cursorSvg = document.createElementNS(svgNS, "svg");
+
+    // Set SVG attributes. The viewBox defines the coordinate system.
+    cursorSvg.setAttribute('width', '36');
+    cursorSvg.setAttribute('height', '36');
+    cursorSvg.setAttribute('viewBox', '0 0 36 36');
+    cursorSvg.style.position = 'absolute';
+    // Offset the SVG so the tip of the pointer is at the (x,y) coordinate.
+    cursorSvg.style.transform = 'translate(-4px, -4px)';
+
+    // Create a group for the "sparkle" lines
+    const sparkles = document.createElementNS(svgNS, 'g');
+    sparkles.setAttribute('fill', 'none');
+    sparkles.setAttribute('stroke', 'black');
+    sparkles.setAttribute('stroke-width', '2.5');
+    sparkles.setAttribute('stroke-linecap', 'round');
+
+    // Define the paths for the three sparkle lines
+    const sparklePaths = [
+        'M18 2 L22 6',
+        'M2 18 L6 22',
+        'M8 2 L12 6'
+    ];
+
+    sparklePaths.forEach(d => {
+        const path = document.createElementNS(svgNS, 'path');
+        path.setAttribute('d', d);
+        sparkles.appendChild(path);
+    });
+
+    // Create the main pointer shape
+    const pointer = document.createElementNS(svgNS, 'path');
+    pointer.setAttribute('d', 'M9 9 L23 23 L17.5 24 L7.5 14 Z');
+    pointer.setAttribute('fill', 'black');
+
+    // Add the pointer and sparkles to the SVG, then the SVG to the container
+    cursorSvg.appendChild(pointer);
+    cursorSvg.appendChild(sparkles);
+    container.appendChild(cursorSvg);
+
+
+    // --- 3. Generate and Style the Animated Lines ---
+    // This logic remains the same, creating the radial lines around the new cursor.
+    const numberOfLines = 12;
+    const maxAnimationTime = (1.2 + 0.4 + 0.1) * 1000;
+
+    for (let i = 0; i < numberOfLines; i++) {
+        const angle = (i * 30) + Math.random() * 10 - 5;
+        const length = 40 + Math.random() * 30;
+        const duration = 1.2 + Math.random() * 0.4;
+        const delay = Math.random() * 0.1;
+
+        const wrapper = document.createElement('div');
+        wrapper.style.position = 'absolute';
+        wrapper.style.transformOrigin = 'top left';
+        wrapper.style.transform = `rotate(${angle}deg)`;
+
+        const line = document.createElement('div');
+        line.style.width = '2px';
+        line.style.backgroundColor = 'black';
+        line.style.borderRadius = '9999px';
+        line.style.height = `${length}px`;
+        line.style.transformOrigin = '50% 0%';
+        line.style.animationName = 'radial-splash-animation';
+        line.style.animationDuration = `${duration}s`;
+        line.style.animationDelay = `${delay}s`;
+        line.style.animationFillMode = 'both';
+
+        wrapper.appendChild(line);
+        container.appendChild(wrapper);
+    }
+
+    // --- 4. Add to Document and Schedule Cleanup ---
+    document.body.appendChild(container);
+
+    setTimeout(() => {
+        if (container.parentNode) {
+            container.parentNode.removeChild(container);
+        }
+    }, maxAnimationTime + 200);
+};
+
+"""
+
+            browser_info(f"Attempting to show pointer at coordinates: ({x}, {y})")
             # Pass coordinates as a dictionary to match the JavaScript parameters
             result = await self.page.evaluate(js_code, {'x': x, 'y': y})
         
             if result:
-                print(f"[BROWSER] Pointer created successfully at ({x}, {y})")
+                browser_info(f"Pointer created successfully at ({x}, {y})")
                 return BrowserActionResult.create_success(
                     action_type="show_pointer",
                     message=f"Successfully showed pointer at coordinates ({x},{y})",
@@ -607,7 +596,7 @@ class Browser:
             else:
                 raise Exception("Failed to create pointer element")
         except Exception as e:
-            print(f"[BROWSER] Error showing pointer: {e}")
+            browser_error(f"Error showing pointer: {e}")
             return BrowserActionResult.create_failure(
                 action_type="show_pointer",
                 message=f"Error showing pointer: {str(e)}",
